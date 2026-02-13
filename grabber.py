@@ -18,12 +18,11 @@ def get_fresh_link(base_url):
         res1 = session.get(f"{PORTAL}?type=stb&action=handshake&token=&JsHttpRequest=1-xml", headers={'Cookie': f'mac={MAC}'})
         token = res1.json()['js']['token']
 
-        # 2. Get Profile (Necessary for session stability)
+        # 2. Get Profile
         session.get(f"{PORTAL}?type=stb&action=get_profile&JsHttpRequest=1-xml", 
                     headers={'Authorization': f'Bearer {token}', 'Cookie': f'mac={MAC}'})
 
         # 3. Create Link
-        # Portal ko CMD bhejne ke liye 'ffrt ' zaroori hai
         cmd = f"ffrt {base_url}"
         encoded_cmd = urllib.parse.quote(cmd)
         
@@ -31,11 +30,10 @@ def get_fresh_link(base_url):
                            headers={'Authorization': f'Bearer {token}', 'Cookie': f'mac={MAC}; stb_lang=en; timezone=GMT;'})
         
         fresh_url = res3.json()['js']['cmd'].replace("ffrt ", "").strip()
-        print(f"Generated Fresh Link: {fresh_url[:50]}...")
         return fresh_url
     except Exception as e:
         print(f"Error grabbing link: {e}")
-        return base_url
+        return None
 
 # --- MAIN LOGIC ---
 print("Fetching current JSON from npoint...")
@@ -45,20 +43,36 @@ if response.status_code != 200:
     exit()
 
 channels = response.json()
+updated_count = 0
 
-# Har channel ki link refresh karo jisme packetcdn ya stalker link ho
 for channel in channels:
-    if "packetcdn.me" in channel['url'] or "localhost" in channel['url']:
-        # Token hata kar sirf base link nikaalo
-        base_link = channel['url'].split('?')[0]
-        print(f"Refreshing Channel: {channel.get('name', 'Unknown')}")
-        channel['url'] = get_fresh_link(base_link)
+    url = channel.get('url', "")
+    # 🔥 Sirf unhi links ko update karega jisme #auto likha hai
+    if "#auto" in url:
+        print(f"Target Found: {channel.get('name', 'Unknown')}")
+        
+        # 1. #auto ko hata kar aur purane token ko hata kar base link nikaalein
+        clean_url = url.split('#')[0] # #auto hataya
+        base_link = clean_url.split('?')[0] # purana token hataya
+        
+        # 2. Naya token mangwayein
+        new_token_url = get_fresh_link(base_link)
+        
+        if new_token_url:
+            # 3. Nayi link ke piche wapas #auto laga dein taaki agli baar phir update ho sake
+            channel['url'] = f"{new_token_url}#auto"
+            print(f"Successfully Refreshed: {channel.get('name')}")
+            updated_count += 1
+        else:
+            print(f"Failed to refresh: {channel.get('name')}")
 
 # Naya JSON npoint par update karo
-print("Updating npoint.io...")
-update_res = requests.post(f"https://api.npoint.io/{NPOINT_ID}", json=channels)
-
-if update_res.status_code == 200:
-    print("SUCCESS: All links updated in npoint!")
+if updated_count > 0:
+    print(f"Updating npoint.io with {updated_count} new links...")
+    update_res = requests.post(f"https://api.npoint.io/{NPOINT_ID}", json=channels)
+    if update_res.status_code == 200:
+        print("SUCCESS: JSON updated on npoint!")
+    else:
+        print(f"ERROR: Failed to update npoint. Status: {update_res.status_code}")
 else:
-    print(f"ERROR: Failed to update npoint. Status: {update_res.status_code}")
+    print("No channels with #auto found. Nothing to update.")
